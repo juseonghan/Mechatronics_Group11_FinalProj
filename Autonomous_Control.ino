@@ -2,111 +2,164 @@
 // Team 11
 // John Han, Peter Weiss, Carl Urbanik
 
-#include <Servo.h>
-#include <Pixy2.h>
+#include <Pixy2UART.h>
 #include <AFMotor.h>
+#include <Servo.h>
 
-#define LED1 22
-#define LED2 24
-#define LED3 26
-#define LED3 28
-#define LED3 30
-#define LED3 32
-#define LED3 34
-#define LED3 36
-#define LED3 38
 #define stepsPerRevolution 2048
+#define echo_pin 44
+#define trig_pin 46
+#define ultrasonic_generator 30
 
-int LED_array[] = {22, 24, 26, 28, 30, 32, 34, 36, 38}; 
-
+AF_DCMotor L_motor(3);
+AF_DCMotor R_motor(4);
+Pixy2UART pixy; 
 Servo gun_motor; 
-AF_Stepper thwack_motor(stepsPerRevolution, 2); 
-Pixy2 pixy; 
+
 int servo_position; 
-int front_ping_sensor = 4; 
-float distance_enemy, desired_distance, pulseduration; 
+int motor_speed = 200; 
+float distance_enemy; 
+float distance_needed = 150; // how far away do we shoot?
+long pulseduration;
+
+// LED disturbance
+int LED_array[] = {22, 24, 26, 28, 30, 32, 34, 36, 38}; 
 
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(9600); 
-  gun_motor.attach(10); 
-  servo_position = 30; 
-  pixy.init(); 
-  distance_enemy = 0.0;
+
+  // pixy init
+  pixy.init(9600); 
   
-  pinMode(front_ping_sensor, OUTPUT); 
+  // distance sensor init
+  pinMode(trig_pin, OUTPUT); 
+  pinMode(echo_pin, INPUT); 
+
+  // ultrasonic signal generator init
+  pinMode(ultrasonic_generator, OUTPUT); 
+  digitalWrite(ultrasonic_generator, HIGH); 
+  
   for (int i = 0; i < 9; i++) {
     pinMode(LED_array[i], OUTPUT); 
   }
 
-  thwack_motor.setSpeed(10); 
 }
 
 void loop() {
+
+  digitalWrite(ultrasonic_generator, LOW); 
   // put your main code here, to run repeatedly:
-  thwack_motor.step(1024, FORWARD, DOUBLE); 
-  turnOnLED(); 
-  delay(1000); 
   pixy.ccc.getBlocks(); 
-  // if we don't detect anything, then just continue looking around motion
-  if (!pixy.ccc.numBlocks) {
-    // robot.spinAround(); 
-    delay(1000); 
-    return; 
-  }
-
-  // read the distance from the front distance sensor
-  distance_enemy = readDistance(front_ping_sensor); 
-
-  // we need to get to the distance to shoot the gun from so that it can hit their balloon
-  while (abs(distance_enemy - desired_distance) > 5) {
-    if (distance_enemy > desired_distance) {
-      // we're too far away 
-      // robot.goForward(); 
-    } else {
-      // too close up
-      // robot.goBackwards(); 
-    }
-  }
-
-  // we detected it! calculate some sort of distance + then shoot it
-  shoot(); 
   
+  // a centering algorithm
+  if (getPixyColor() == 1) {
+    if (pixy.ccc.blocks[0].m_x > 165) { // Post-it too far right
+      scootchRight();                     // Turn right (slightly)
+      Serial.println("Turn right");
+    }
+    else if (pixy.ccc.blocks[0].m_x < 151) { // Post-it too far left
+      scootchLeft();                          // Turn left (slightly)
+      Serial.println("Turn left");
+    }
+    else {
+       // get distance sensor measurements
+       // get to that distance and maintain
+       // shoot();
+       distance_enemy = readDistance(); 
+       if (abs(distance_enemy - distance_needed) > 5) {
+        if (distance_enemy > distance_needed) {
+          // it's too far away 
+          Serial.println("Aligned, but too far");
+          Serial.println(distance_enemy);
+          moveForward(); 
+        } else {
+          moveBackward(); 
+          Serial.println("Aligned, but too close");
+          Serial.println(distance_enemy);
+        }
+        //distance_enemy = readDistance(); 
+        //Serial.print("dist sensed: "); 
+        //Serial.println(distance_enemy); 
+       } else {
+        shoot(); 
+        Serial.println("Fire!");
+       }
+    }
+  } else {
+    stopMotors(); 
+    Serial.println("Balloon not spotted");
+  }
+  digitalWrite(ultrasonic_generator, HIGH); 
+}
+
+int getPixyColor() {
+  return pixy.ccc.blocks[0].m_signature;
+}
+
+void moveForward() {
+  L_motor.run(FORWARD); 
+  R_motor.run(FORWARD); 
+  delay(150); 
+}
+
+void moveBackward() {
+  L_motor.run(BACKWARD); 
+  R_motor.run(BACKWARD); 
+}
+
+void scootchLeft() {
+  //L_motor.run(RELEASE);
+  //R_motor.run(RELEASE); 
+  L_motor.setSpeed(150); 
+  R_motor.setSpeed(150); 
+  L_motor.run(BACKWARD);
+  R_motor.run(FORWARD);
+  delay(100); 
+  //L_motor.run(RELEASE);
+  //R_motor.run(RELEASE);  
+  setDefaultSpeed(); 
+}
+
+void scootchRight() {
+  //L_motor.run(RELEASE);
+  //R_motor.run(RELEASE); 
+  L_motor.setSpeed(150); 
+  R_motor.setSpeed(150); 
+  L_motor.run(FORWARD);
+  R_motor.run(BACKWARD);
+  delay(100); 
+  //L_motor.run(RELEASE);
+  //R_motor.run(RELEASE); 
+  setDefaultSpeed(); 
+}
+
+void setDefaultSpeed() {
+  L_motor.setSpeed(motor_speed); 
+  R_motor.setSpeed(motor_speed); 
+}
+
+void stopMotors() {
+  L_motor.run(RELEASE);
+  R_motor.run(RELEASE); 
+}
+
+float readDistance() {
+  // send a flurry of signal to activate trigger
+  digitalWrite(trig_pin, LOW);
+  delayMicroseconds(2);
+  // Sets the trigPin HIGH (ACTIVE) for 10 microseconds
+  digitalWrite(trig_pin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trig_pin, LOW);
+  // Reads the echoPin, returns the sound wave travel time in microseconds
+  pulseduration = pulseIn(echo_pin, HIGH);
+  // Calculating the distance
+  return pulseduration * 0.034 / 2; // Speed of sound wave divided by 2 (go and back)
 }
 
 void shoot() {
-  gun_motor.write(servo_position); 
-  delay(500); 
   gun_motor.write(servo_position + 45); 
   delay(100); 
   gun_motor.write (servo_position); 
-  delay(5000); 
-}
-
-float readDistance(int pin) {
-  // send a flurry of signal to activate trigger
-  pinMode(pin, OUTPUT);
-  digitalWrite(pin, LOW);
-  delayMicroseconds(5);
-  digitalWrite(pin, HIGH);
-  delayMicroseconds(5);
-  digitalWrite(pin, LOW);
-  // then start reading from the pin
-  pinMode(pin, INPUT);
-  // get the duration of the pulse as it's high
-  pulseduration = pulseIn(pin, HIGH);
-  // do some calculations and return the value in cm
-  return pulseduration * 343 / 20000;
-}
-
-void turnOnLED() {
-  for (int i = 0; i < 9; i++) {
-    digitalWrite(LED_array[i], HIGH); 
-  }
-}
-
-void turnOffLED() {
-  for (int i = 0; i < 9; i++) {
-    digitalWrite(LED_array[i], LOW); 
-  }
 }
