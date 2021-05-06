@@ -1,5 +1,5 @@
-# Mechatronics_Group11_FinalProj
-JHU EN530.421 Group 11 Final Project
+# Mechatronics Group 11 Final Project: BattleBot
+JHU EN530.421 Mechatronics 
 
 Team Members: John Han, Peter Weiss, Carl Urbanik
 
